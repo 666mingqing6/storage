@@ -15,8 +15,43 @@
     />
 
     <div class="main-content" v-if="hasPermission">
+      <!-- 上传方式切换：文件上传 / 远程 URL 转存 -->
+      <div class="mb-4 border-b" :class="darkMode ? 'border-gray-700' : 'border-gray-200'">
+        <nav class="-mb-px flex gap-1" role="tablist">
+          <button
+            v-for="tab in uploadTabs"
+            :key="tab.key"
+            type="button"
+            role="tab"
+            :aria-selected="activeTab === tab.key"
+            class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5"
+            :class="
+              activeTab === tab.key
+                ? darkMode
+                  ? 'border-emerald-500 text-emerald-400'
+                  : 'border-emerald-600 text-emerald-700'
+                : darkMode
+                  ? 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            "
+            @click="activeTab = tab.key"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-4 w-4 flex-shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="tab.iconPath" />
+            </svg>
+            {{ tab.label }}
+          </button>
+        </nav>
+      </div>
+
       <!-- 文件上传区域 -->
-      <div class="card mb-6 p-4 sm:p-6">
+      <div v-show="activeTab === 'file'" class="card mb-6 p-4 sm:p-6">
         <UppyShareUploader
           :dark-mode="darkMode"
           :loading="loadingFiles"
@@ -25,6 +60,20 @@
           @upload-success="handleUploadSuccess"
           @upload-error="handleUploadError"
           @share-results="handleShareResults"
+        />
+      </div>
+
+      <!-- 远程 URL 转存区域 -->
+      <div v-show="activeTab === 'remote'" class="card mb-6 p-4 sm:p-6">
+        <RemoteUrlUploader
+          :dark-mode="darkMode"
+          :loading="loadingFiles"
+          :is-admin="isAdmin"
+          :storage-configs="storageConfigsStore.sortedConfigs"
+          @upload-success="handleUploadSuccess"
+          @upload-error="handleUploadError"
+          @share-results="handleShareResults"
+          @refresh-files="handleRefreshFiles"
         />
       </div>
 
@@ -95,6 +144,7 @@
 import { ref, onMounted, computed } from "vue";
 import { storeToRefs } from "pinia";
 import UppyShareUploader from "@/modules/upload/public/components/UppyShareUploader.vue";
+import RemoteUrlUploader from "@/modules/upload/public/components/RemoteUrlUploader.vue";
 import FileList from "@/modules/upload/public/components/FileList.vue";
 import PermissionManager from "@/components/common/PermissionManager.vue";
 import ShareLinkBox from "@/components/common/ShareLinkBox.vue";
@@ -123,6 +173,21 @@ const storageConfigsStore = useStorageConfigsStore();
 const files = ref([]);
 const loadingFiles = ref(false);
 const shareResults = ref([]);
+// 当前上传方式：'file'（浏览器上传） | 'remote'（远程 URL 转存）
+const activeTab = ref("file");
+
+const uploadTabs = computed(() => [
+  {
+    key: "file",
+    label: t("file.uploadTabs.fileUpload"),
+    iconPath: "M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12",
+  },
+  {
+    key: "remote",
+    label: t("file.uploadTabs.remoteUrl"),
+    iconPath: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1",
+  },
+]);
 const shareResultsCacheKey = (item) => item?.id || item?.slug || item?.shareUrl || `${item?.filename || ""}-${item?.shareUrl || ""}`;
 const shareListContainerClass = computed(() => {
   const base = "space-y-3";
@@ -247,6 +312,13 @@ const handleShareResults = (results = []) => {
 
 const clearShareResults = () => {
   shareResults.value = [];
+};
+
+// 远程 URL 转存完成后刷新最近上传列表
+const handleRefreshFiles = () => {
+  if (canLoadRecentFiles.value) {
+    loadFiles();
+  }
 };
 
 const openShareQRCode = (link) => {

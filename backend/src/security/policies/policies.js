@@ -79,8 +79,9 @@ const Policies = {
     permissions: [Permission.FILE_SHARE],
     message: "缺少文件分享创建权限",
   },
-  //目前作为占位符无用
-  // URL 上传：只要具备“创建文件分享”或“挂载上传”能力之一即可。
+  // URL 转存：只要具备「创建文件分享」或「挂载上传」能力之一即可。
+  // 实际生效点：/api/share/url/probe 与 /api/share/url/transfer，
+  // 用于服务端拉取远程 URL 并写入存储，属高风险出站操作，权限从严。
   "urlupload.manage": {
     permissions: [Permission.FILE_SHARE, Permission.MOUNT_UPLOAD],
     message: "缺少URL上传权限",

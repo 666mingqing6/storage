@@ -2,6 +2,12 @@
 node_modules
 dev-dist
 
+# Build output
+dist
+
+# Vite 临时配置文件（构建期生成）
+vite.config.js.timestamp-*
+
 # Wrangler specific
 .wrangler/
 

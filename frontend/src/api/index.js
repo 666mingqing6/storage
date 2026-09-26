@@ -15,6 +15,7 @@ import * as storageService from "./services/storageService";
 import * as mountService from "./services/mountService";
 import * as systemService from "./services/systemService";
 import * as urlUploadService from "./services/urlUploadService";
+import * as urlTransferService from "./services/urlTransferService";
 import * as fsService from "./services/fsService";
 import * as fsIndexService from "./services/fsIndexService";
 
@@ -59,6 +60,9 @@ export const api = {
 
   // URL上传相关
   urlUpload: urlUploadService,
+
+  // 远程 URL 转存（服务端拉取，不经浏览器中转）
+  urlTransfer: urlTransferService,
 
   // 文件系统相关 - 统一API，自动根据认证信息处理用户类型
   fs: {
@@ -163,6 +167,12 @@ export const api = {
       validateUrlInfo: urlUploadService.validateUrlInfo,
       getProxyUrl: urlUploadService.getProxyUrl,
       fetchUrlContent: urlUploadService.fetchUrlContent,
+    },
+
+    // API密钥用户的远程 URL 转存服务
+    urlTransfer: {
+      probeUrl: urlTransferService.probeUrl,
+      transferUrl: urlTransferService.transferUrl,
     },
 
     // API密钥用户的系统服务

@@ -5,6 +5,7 @@ import { usePolicy } from "../security/policies/policies.js";
 import { resolvePrincipal } from "../security/helpers/principal.js";
 import { getEncryptionSecret } from "../utils/environmentUtils.js";
 import { FileShareService } from "../services/fileShareService.js";
+import { UrlTransferService } from "../services/urlTransferService.js";
 import { LinkService } from "../storage/link/LinkService.js";
 import { getFileBySlug, getPublicFileInfo } from "../services/fileService.js";
 import { useRepositories } from "../utils/repositories.js";
@@ -334,13 +335,123 @@ router.post("/api/share/commit", requireFilesCreate, async (c) => {
   return jsonOk(c, result, "预签名上传提交成功");
 });
 
-// =============== URL 信息/代理（并入分享上传模块） ===============
+// =============== URL 转存（远程 URL → 服务端流式下载 → 存储 → 返回链接） ===============
 const parseJsonBody = async (c, next) => {
   const body = await c.req.json();
   c.set("jsonBody", body);
   await next();
 };
 
+/**
+ * 解析当前主体信息
+ * 复用与 upload-direct 一致的信任边界，避免各处实现漂移
+ */
+const resolveUploadPrincipal = (c) => {
+  const principalInfo = resolvePrincipal(c, { allowedTypes: [UserType.ADMIN, UserType.API_KEY] });
+  const { type: userType, userId, apiKeyInfo } = principalInfo;
+  const userIdOrInfo = userType === UserType.ADMIN ? userId : apiKeyInfo;
+  return { userType, userIdOrInfo };
+};
+
+// 探测远程 URL：合法性校验 + 元信息读取（不下载正文）
+router.post("/api/share/url/probe", requireFilesCreate, parseJsonBody, async (c) => {
+  const db = c.env.DB;
+  const encryptionSecret = getEncryptionSecret(c);
+  const repositoryFactory = useRepositories(c);
+  const body = c.get("jsonBody") || {};
+
+  const url = typeof body.url === "string" ? body.url.trim() : "";
+  if (!url) {
+    throw new ValidationError("缺少 url 参数");
+  }
+
+  const service = new UrlTransferService(db, encryptionSecret, repositoryFactory);
+  const info = await service.probe({
+    url,
+    overrideFilename: body.filename || null,
+  });
+
+  return jsonOk(c, info, "URL 检测成功");
+});
+
+// 执行转存：服务端拉取远程文件并写入目标存储，返回可访问链接
+router.post("/api/share/url/transfer", requireFilesCreate, parseJsonBody, async (c) => {
+  const db = c.env.DB;
+  const encryptionSecret = getEncryptionSecret(c);
+  const repositoryFactory = useRepositories(c);
+  const body = c.get("jsonBody") || {};
+
+  const url = typeof body.url === "string" ? body.url.trim() : "";
+  if (!url) {
+    throw new ValidationError("缺少 url 参数");
+  }
+
+  const { userType, userIdOrInfo } = resolveUploadPrincipal(c);
+
+  const service = new UrlTransferService(db, encryptionSecret, repositoryFactory);
+
+  const result = await service.transfer({
+    url,
+    userIdOrInfo,
+    userType,
+    options: {
+      filename: body.filename || null,
+      storage_config_id: body.storage_config_id || null,
+      path: body.path || null,
+      slug: body.slug || null,
+      remark: body.remark || "",
+      password: body.password || null,
+      expires_in: Number(body.expires_in) || 0,
+      max_views: Number(body.max_views) || 0,
+      override: Boolean(body.override),
+    },
+    request: c.req.raw,
+  });
+
+  // 与 upload-direct 对齐：返回统一的公开文件信息（previewUrl / downloadUrl / linkType）
+  try {
+    const file = await getFileBySlug(db, result.record.slug, encryptionSecret);
+    const linkService = new LinkService(db, encryptionSecret, repositoryFactory);
+    const link = await linkService.getShareExternalLink(file, null);
+    const requestUrl = new URL(c.req.url);
+    const publicInfo = await getPublicFileInfo(db, file, false, link, encryptionSecret, {
+      baseOrigin: requestUrl.origin,
+    });
+
+    return jsonOk(
+      c,
+      {
+        ...publicInfo,
+        // 转存附加信息：便于前端展示来源与处理结果
+        sourceUrl: result.sourceUrl,
+        resolvedUrl: result.finalUrl,
+        filename: result.filename,
+        size: result.size,
+        contentType: result.contentType,
+        renamedForConflict: result.renamedForConflict,
+        requires_password: Boolean(file.password),
+      },
+      "文件转存成功",
+    );
+  } catch (error) {
+    // 兜底：公开信息构建失败时仍返回基础记录，避免前端完全拿不到结果
+    console.warn("url/transfer: 生成公开文件信息失败，返回基础记录：", error);
+    const { url: _ignoredUrl, ...rest } = result.record || {};
+    return jsonOk(
+      c,
+      {
+        ...rest,
+        sourceUrl: result.sourceUrl,
+        filename: result.filename,
+        size: result.size,
+        contentType: result.contentType,
+      },
+      "文件转存成功",
+    );
+  }
+});
+
+// =============== 兼容保留：URL 信息 / 代理（原有实现） ===============
 router.post("/api/share/url/info", requireFilesCreate, parseJsonBody, async (c) => {
   const db = c.env.DB;
   const body = c.get("jsonBody") || {};
